@@ -10,4 +10,4 @@ SELECT
     model_location_unit,         -- Комбинированный ключ: модель + ТРЦ + помещение
     location_unit,               -- Комбинированный ключ: ТРЦ + помещение
 FROM operational_status
-WHERE lease_id IN ({lease_id})
+WHERE lease_id IN ({lease_id_placeholder})

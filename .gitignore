@@ -1,1 +1,3 @@
 room-history/config/credentials.py
+room-history/sql/extract_rooms.sql
+room-history/sql/extract_statuses.sql
