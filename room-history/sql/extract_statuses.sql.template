@@ -1,0 +1,13 @@
+-- sql/templates/extract_statuses.sql.template
+SELECT
+    status_timestamp,            -- Дата входа в статус
+    rotation_flag,               -- Статус ротации
+    model_id,                    -- Уникальный идентификатор финансовой модели
+    lease_id,                    -- Уникальный идентификатор договора аренды
+    unit_id,                     -- Уникальный идентификатор помещения
+    total_area,                  -- Общая площадь помещения в кв. метрах
+    location_name,               -- Наименование ТРЦ
+    model_location_unit,         -- Комбинированный ключ: модель + ТРЦ + помещение
+    location_unit,               -- Комбинированный ключ: ТРЦ + помещение
+FROM operational_status
+WHERE lease_id IN ({lease_id})
