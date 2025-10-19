@@ -1,94 +1,84 @@
-Модель данных торгового центра (ТРЦ)
-Общее описание
-Модель данных для управления торговыми центрами, включающая информацию о помещениях, договорах аренды, ответственных сотрудниках и статусах помещений в различных финансовых моделях.
 
-Таблицы измерений (Dimensions)
-dim_employee
-Справочник сотрудников
 
-```sql
-employee_id (PK) - Идентификатор сотрудника
-full_name - ФИО сотрудника
-```
-dim_financial_model
-Справочник финансовых моделей
-```
-```sql
-financial_model_id (PK) - Идентификатор финансовой модели
-model_name - Название модели
-forecast_year - Год прогноза (может быть NULL)
-model_type - Тип модели (Факт/План/Прогноз)
-```
-dim_rent_contract
-Справочник договоров аренды
 
-```sql
-contract_id (PK) - Идентификатор договора
-contract_number - Номер договора
-tenant_name - Наименование арендатора
-start_date - Дата начала договора
-end_date - Дата окончания договора
-rent_amount - Сумма арендной платы
-room_id (FK) - Ссылка на помещение
-trc_id (FK) - Ссылка на ТРЦ
-legal_entity - Юридическое лицо
-```
-dim_room
-Справочник помещений
+# Модель данных торгового центра (Схема "созвездие")
 
-```sql
-room_id (PK) - Идентификатор помещения
-area_sq_m - Площадь помещения (м²)
-floor - Этаж
-trc_id (FK) - Ссылка на ТРЦ
-legal_entity - Юридическое лицо
-```
-dim_trc
-Справочник торговых центров
+![mock_sqlite.png](mock_sqlite.png)
 
+## Таблицы измерений (Dimensions)
+
+### dim_employee
 ```sql
-trc_id (PK) - Идентификатор ТРЦ
-trc_name - Название ТРЦ
-city - Город
-legal_entity - Юридическое лицо
+employee_id INTEGER PRIMARY KEY
+full_name TEXT NOT NULL
 ```
 
-Таблицы фактов (Facts)
-fact_responsibility
-Факты ответственности (обычные ответственные)
-
+### dim_financial_model
 ```sql
-responsibility_id (PK) - Идентификатор ответственности
-room_id (FK) - Ссылка на помещение
-trc_id (FK) - Ссылка на ТРЦ
-legal_entity - Юридическое лицо
-start_date - Дата начала ответственности
-change_number - Порядковый номер изменения
-employee_id (FK) - Ссылка на сотрудника
+financial_model_id INTEGER PRIMARY KEY
+model_name TEXT NOT NULL
+forecast_year INTEGER
+model_type TEXT NOT NULL
 ```
-fact_senior_responsibility
-Факты ответственности (старшие ответственные)
 
+### dim_room
 ```sql
-responsibility_id (PK) - Идентификатор ответственности
-room_id (FK) - Ссылка на помещение
-trc_id (FK) - Ссылка на ТРЦ
-legal_entity - Юридическое лицо
-start_date - Дата начала ответственности
-change_number - Порядковый номер изменения
-employee_id (FK) - Ссылка на сотрудника
+room_key INTEGER PRIMARY KEY AUTOINCREMENT
+room_id TEXT NOT NULL
+area_sq_m REAL NOT NULL
+floor INTEGER NOT NULL
+trc_id TEXT NOT NULL
+legal_entity TEXT NOT NULL
 ```
-fact_room_status
-Факты статусов помещений
 
+### dim_rent_contract
 ```sql
-financial_model_id (FK) - Ссылка на финансовую модель
-trc_id (FK) - Ссылка на ТРЦ
-legal_entity - Юридическое лицо
-room_id (FK) - Ссылка на помещение
-change_number - Порядковый номер изменения статуса
-start_date - Дата начала действия статуса
-status - Статус помещения (Свободен/Арендован/Ремонт)
-contract_id (FK, NULL) - Ссылка на текущий договор (или прошлый)
-contract_id_next (FK, NULL) - Ссылка на следующий договор (если известен)
+contract_id TEXT PRIMARY KEY
+contract_number TEXT NOT NULL
+tenant_name TEXT NOT NULL
+start_date DATE NOT NULL
+end_date DATE NOT NULL
+rent_amount REAL NOT NULL
+room_key INTEGER NOT NULL
+FOREIGN KEY (room_key) REFERENCES dim_room(room_key)
+```
+
+## Таблицы фактов (Facts)
+
+### fact_responsibility
+```sql
+responsibility_id INTEGER PRIMARY KEY
+room_key INTEGER NOT NULL
+start_date DATE NOT NULL
+change_number INTEGER NOT NULL
+employee_id INTEGER NOT NULL
+FOREIGN KEY (room_key) REFERENCES dim_room(room_key)
+FOREIGN KEY (employee_id) REFERENCES dim_employee(employee_id)
+```
+
+### fact_senior_responsibility
+```sql
+responsibility_id INTEGER PRIMARY KEY
+room_key INTEGER NOT NULL
+start_date DATE NOT NULL
+change_number INTEGER NOT NULL
+employee_id INTEGER NOT NULL
+FOREIGN KEY (room_key) REFERENCES dim_room(room_key)
+FOREIGN KEY (employee_id) REFERENCES dim_employee(employee_id)
+```
+
+### fact_room_status
+```sql
+financial_model_id INTEGER NOT NULL
+room_key INTEGER NOT NULL
+change_number INTEGER NOT NULL
+start_date DATE NOT NULL
+status TEXT NOT NULL
+contract_id TEXT
+contract_id_next TEXT
+PRIMARY KEY (financial_model_id, room_key, change_number)
+FOREIGN KEY (financial_model_id) REFERENCES dim_financial_model(financial_model_id)
+FOREIGN KEY (room_key) REFERENCES dim_room(room_key)
+FOREIGN KEY (contract_id) REFERENCES dim_rent_contract(contract_id)
+FOREIGN KEY (contract_id_next) REFERENCES dim_rent_contract(contract_id)
 ```
