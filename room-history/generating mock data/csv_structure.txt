@@ -1,0 +1,89 @@
+Структура CSV файлов в папке:
+==================================================
+
+Файл: dim_employee.csv
+Количество строк: 21
+Поля:
+  1. employee_id
+  2. full_name
+
+------------------------------
+
+Файл: dim_financial_model.csv
+Количество строк: 6
+Поля:
+  1. financial_model_id
+  2. model_name
+  3. forecast_year
+  4. model_type
+
+------------------------------
+
+Файл: dim_rent_contract.csv
+Количество строк: 11
+Поля:
+  1. contract_id
+  2. contract_number
+  3. tenant_name
+  4. start_date
+  5. end_date
+  6. rent_amount
+  7. room_id
+  8. trc_id
+  9. legal_entity
+
+------------------------------
+
+Файл: dim_room.csv
+Количество строк: 15
+Поля:
+  1. id
+  2. room_id
+  3. area_sq_m
+  4. floor
+  5. trc_id
+  6. legal_entity
+
+------------------------------
+
+Файл: fact_responsibility.csv
+Количество строк: 11
+Поля:
+  1. responsibility_id
+  2. room_id
+  3. trc_id
+  4. legal_entity
+  5. start_date
+  6. change_number
+  7. employee_id
+
+------------------------------
+
+Файл: fact_room_status.csv
+Количество строк: 18
+Поля:
+  1. financial_model_id
+  2. trc_id
+  3. legal_entity
+  4. room_id
+  5. change_number
+  6. start_date
+  7. status
+  8. contract_id
+  9. contract_id_next
+
+------------------------------
+
+Файл: fact_senior_responsibility.csv
+Количество строк: 11
+Поля:
+  1. responsibility_id
+  2. room_id
+  3. trc_id
+  4. legal_entity
+  5. start_date
+  6. change_number
+  7. employee_id
+
+------------------------------
+
