@@ -1,4 +1,4 @@
--- sql/templates/extract_rooms.sql.template
+-- sql/templates/extract_tenants.sql.template
 SELECT
     model_id,                    -- Уникальный идентификатор финансовой модели
     lease_id,                    -- Уникальный идентификатор договора аренды
@@ -23,3 +23,4 @@ SELECT
     renovation_days,             -- Количество дней, отведенных на ремонт
     agreement_end                -- Дата окончания действия договора
 FROM business_units
+WHERE lease_id IN ({lease_id_placeholder})

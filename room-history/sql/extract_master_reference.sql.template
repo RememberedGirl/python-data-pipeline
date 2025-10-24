@@ -1,0 +1,8 @@
+-- Мастер-справочник уникальных идентификаторов
+SELECT DISTINCT
+    model_id,
+    unit_id,
+    lease_id,
+    legal_entity,
+    trc_abbreviation
+FROM tbl_crm_status_hist
