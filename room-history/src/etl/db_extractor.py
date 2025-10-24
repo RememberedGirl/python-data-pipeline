@@ -2,19 +2,24 @@
 Модуль для извлечения данных из SQL Server и сохранения в CSV
 """
 
-import pandas as pd
-import logging
-from pathlib import Path
-import sys
-from typing import List, Optional
+import pandas as pd  # Импорт библиотеки pandas для работы с данными в табличном формате
+from pathlib import Path  # Импорт для работы с путями файловой системы
+import sys  # Импорт системных функций
+
 
 # Добавляем путь к src для корректного импорта
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+project_root = Path(__file__).parent.parent.parent  # Получаем путь к корню проекта (три уровня вверх)
 
-from src.database.db_connector import SQLServerConnector, create_db_connector_from_config
+# sys.path - это список путей, где Python ищет модули и пакеты при выполнении import
+# До: sys.path содержит стандартные пути Python
+# ['/usr/lib/python3.8', '/usr/local/lib/python3.8/site-packages', ...]
+# После: добавляется путь к проекту в начало
+# ['/home/user/my_project', '/usr/lib/python3.8', '/usr/local/lib/python3.8/site-packages', ...]
 
-logger = logging.getLogger(__name__)
+sys.path.insert(0, str(project_root))  # Добавляем корень проекта в путь для импорта модулей
+
+
+from src.database.db_connector import SQLServerConnector, create_db_connector_from_config  # Импорт классов для работы с БД
 
 
 class DBExtractor:
@@ -22,200 +27,210 @@ class DBExtractor:
 
     def __init__(
             self,
-            connector: SQLServerConnector,
-            sql_dir: str = 'sql',
-            output_dir: str = 'data/raw',
-            encoding: str = 'utf-8'
+            connector: SQLServerConnector,  # Объект соединения с БД
+            sql_dir: str = 'sql',  # Директория с SQL-файлами
+            output_dir: str = 'data/raw',  # Директория для сохранения результатов
+            encoding: str = 'utf-8'  # Кодировка файлов
     ):
-        self.connector = connector
-        self.encoding = encoding
+        self.connector = connector  # Сохраняем соединение с БД
+        self.encoding = encoding  # Сохраняем кодировку
 
         # Определяем пути относительно расположения этого файла
-        current_file_path = Path(__file__).parent
-        project_root = current_file_path.parent.parent
+        self.sql_dir = project_root / sql_dir  # Формируем полный путь к директории с SQL-файлами
+        self.output_dir = project_root / output_dir  # Формируем полный путь к директории для вывода
 
-        self.sql_dir = project_root / sql_dir
-        self.output_dir = project_root / output_dir
-
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        logger.info(f"SQL директория: {self.sql_dir}")
-        logger.info(f"Output директория: {self.output_dir}")
+        self.output_dir.mkdir(parents=True, exist_ok=True)  # Создаем директорию для вывода (если не существует)
 
     def read_sql_file(self, filepath: Path) -> str:
         """Читает SQL-запрос из файла"""
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                return f.read().strip()
+            with open(filepath, 'r', encoding='utf-8') as f:  # Открываем файл для чтения в кодировке UTF-8
+                return f.read().strip()  # Читаем содержимое и удаляем пробелы по краям
         except Exception as e:
-            logger.error(f"Ошибка чтения SQL файла {filepath}: {e}")
-            raise
-
-    def execute_sql_to_csv(self, sql_filenames: List[str] = None):
-        """Выполняет SQL файлы и сохраняет результаты в CSV"""
-
-        if sql_filenames is None:
-            # Если файлы не указаны, используем все .sql файлы
-            sql_files = list(self.sql_dir.glob('*.sql'))
-            # Исключаем .template файлы
-            sql_files = [f for f in sql_files if not f.name.endswith('.template')]
-        else:
-            # Используем указанные файлы
-            sql_files = [self.sql_dir / filename for filename in sql_filenames]
-
-        logger.info(f"Найдено {len(sql_files)} SQL файлов для обработки")
-
-        for sql_path in sql_files:
-            if not sql_path.exists():
-                logger.warning(f"SQL файл не найден: {sql_path}")
-                continue
-
-            logger.info(f"Обработка файла: {sql_path.name}")
-
-            try:
-                # Читаем SQL запрос
-                sql_query = self.read_sql_file(sql_path)
-
-                # Проверяем наличие плейсхолдеров
-                if '{' in sql_query and '}' in sql_query:
-                    logger.info(f"Файл {sql_path.name} содержит плейсхолдеры, требуется специальная обработка")
-
-                    # Для extract_statuses.sql нужно сначала получить lease_id из extract_rooms.csv
-                    if sql_path.name == 'extract_statuses.sql':
-                        self._process_statuses_with_placeholder(sql_query, sql_path)
-                    else:
-                        logger.warning(f"Неизвестный плейсхолдер в файле {sql_path.name}")
-                    continue
-
-                # Выполняем обычный запрос без плейсхолдеров
-                df = self.connector.execute_query(sql_query)
-
-                # Сохраняем в CSV
-                self._save_to_csv(df, sql_path)
-
-            except Exception as e:
-                logger.error(f"❌ Ошибка при выполнении {sql_path.name}: {e}")
-
-    def _process_statuses_with_placeholder(self, sql_template: str, sql_path: Path):
-        """Обрабатывает extract_statuses.sql с плейсхолдером"""
-        try:
-            # Читаем lease_id из ранее созданного файла extract_rooms.csv
-            rooms_csv_path = self.output_dir / 'extract_rooms.csv'
-
-            if not rooms_csv_path.exists():
-                logger.error(f"Файл {rooms_csv_path} не найден. Сначала выполните extract_rooms.sql")
-                return
-
-            # Читаем CSV с lease_id
-            df_rooms = pd.read_csv(rooms_csv_path)
-            lease_ids = df_rooms['lease_id'].dropna().unique().tolist()
-
-            logger.info(f"Найдено {len(lease_ids)} уникальных lease_id")
-
-            if not lease_ids:
-                logger.warning("Не найдено lease_id для обработки")
-                return
-
-            # Обрабатываем чанками чтобы избежать слишком длинных SQL запросов
-            chunk_size = 500  # Уменьшаем размер чанка для надежности
-            all_chunks = []
-
-            for i in range(0, len(lease_ids), chunk_size):
-                chunk_lease_ids = lease_ids[i:i + chunk_size]
-                ids_str = ','.join(str(int(lease_id)) for lease_id in chunk_lease_ids)
-
-                # Заменяем плейсхолдер
-                sql_query = sql_template.replace('{lease_id_placeholder}', ids_str)
-
-                logger.info(f"Обработка чанка {i // chunk_size + 1} с {len(chunk_lease_ids)} lease_id")
-
-                try:
-                    df_chunk = self.connector.execute_query(sql_query)
-                    all_chunks.append(df_chunk)
-                    logger.info(f"Чанк {i // chunk_size + 1}: получено {len(df_chunk)} записей")
-                except Exception as e:
-                    logger.error(f"Ошибка в чанке {i // chunk_size + 1}: {e}")
-                    # Продолжаем с следующим чанком
-                    continue
-
-            if not all_chunks:
-                logger.warning("Не удалось получить данные ни из одного чанка")
-                return
-
-            # Объединяем все чанки
-            df_result = pd.concat(all_chunks, ignore_index=True)
-
-            # Сохраняем результат
-            self._save_to_csv(df_result, sql_path)
-
-        except Exception as e:
-            logger.error(f"Ошибка при обработке статусов: {e}")
+            print(f"Ошибка чтения SQL файла {filepath}: {e}")  # Выводим ошибку чтения файла
+            raise  # Пробрасываем исключение дальше
 
     def _save_to_csv(self, df: pd.DataFrame, sql_path: Path):
         """Сохраняет DataFrame в CSV файл"""
-        csv_filename = sql_path.stem + '.csv'
-        output_path = self.output_dir / csv_filename
-        df.to_csv(output_path, index=False, encoding=self.encoding)
 
-        logger.info(f"✅ Успешно: {len(df)} записей сохранено в {csv_filename}")
-        logger.info(f"Столбцы: {list(df.columns)}")
+        # path.stem - имя файла без расширения
+        csv_filename = sql_path.stem + '.csv'  # Формируем имя CSV-файла на основе имени SQL-файла
 
-        # Показываем пример данных
-        if len(df) > 0:
-            logger.info("Пример данных (первые 2 строки):")
-            for i, (_, row) in enumerate(df.head(2).iterrows()):
-                logger.info(f"  Строка {i + 1}:")
-                for col in df.columns:
-                    value = row[col]
-                    if pd.isna(value):
-                        display_value = "NULL"
-                    elif hasattr(value, 'isoformat'):
-                        display_value = value.isoformat()
-                    else:
-                        display_value = str(value)
-                    logger.info(f"    {col}: {display_value}")
-        else:
-            logger.warning("Запрос вернул 0 записей")
+        # оператор / для объединения объектов Path (или Path со строкой) в корректный путь файловой системы.
+        output_path = self.output_dir / csv_filename  # Формируем полный путь для сохранения
+        df.to_csv(output_path, index=False, encoding=self.encoding)  # Сохраняем DataFrame в CSV без индексов
+
+        print(f"Успешно: {len(df)} записей сохранено в {csv_filename}")  # Выводим сообщение об успешном сохранении
 
     def test_connection(self):
         """Тестирует подключение к БД"""
-        return self.connector.test_connection()
+        return self.connector.test_connection()  # Вызываем метод тестирования подключения
 
+    def create_reference_table(self, df_master: pd.DataFrame, columns: list):
+        """Создает справочник с уникальными сочетаниями указанных колонок"""
+        if not columns:  # Проверяем что массив колонок не пустой
+            return
+
+        # Проверяем что все указанные колонки существуют в DataFrame
+        missing_columns = [col for col in columns if col not in df_master.columns]
+        if missing_columns:
+            print(f"Предупреждение: колонки {missing_columns} не найдены в данных")
+            return
+
+        # Создаем справочник с уникальными сочетаниями колонок
+        ref_df = df_master[columns].drop_duplicates().reset_index(drop=True)
+
+        # Формируем имя файла из первых слов всех колонок
+        column_prefixes = []
+        for column in columns:
+            # Берем первое слово до первого символа подчеркивания
+            first_word = column.split('_')[0]  # Разделяем по '_' и берем первую часть
+            column_prefixes.append(first_word)
+
+        # Объединяем все префиксы в имя файла
+        base_filename = "ref_" + "_".join(column_prefixes)
+
+        # Сохраняем в CSV
+        self._save_to_csv(ref_df, Path(base_filename))
+
+        # Сохраняем в CSV
+        self._save_to_csv(ref_df, Path(base_filename))
+
+        print(f"Создан справочник {base_filename}.csv с {len(ref_df)} уникальными записями")
+
+    def extract_history(self) -> pd.DataFrame:
+        """
+        Извлекает исторические данные из БД
+
+        Returns:
+            pd.DataFrame: DataFrame с историческими данными
+        """
+        try:
+            # Формируем путь к SQL-файлу с историческими данными
+            history_sql_path = self.sql_dir / 'extract_history.sql'
+
+            # Читаем SQL-запрос из файла
+            sql_query = self.read_sql_file(history_sql_path)
+
+            # Выполняем SQL-запрос и получаем DataFrame
+            df_history = self.connector.execute_query(sql_query)
+
+            # Сохраняем исторические данные в CSV
+            self._save_to_csv(df_history, history_sql_path)
+
+            return df_history
+
+        except Exception as e:
+            print(f"Ошибка при извлечении исторических данных: {e}")
+            return pd.DataFrame()  # Возвращаем пустой DataFrame при ошибке
+
+
+    def get_master_reference(self) -> pd.DataFrame:
+        """
+        Получает мастер-справочник уникальных идентификаторов
+
+        Returns:
+            pd.DataFrame: Мастер-справочник с колонками model_id, unit_id, lease_id, legal_entity
+        """
+
+        master_sql_path = self.sql_dir / 'extract_master_reference.sql'  # Формируем путь к SQL-файлу
+        sql_query = self.read_sql_file(master_sql_path)  # Читаем SQL из файла
+        df_master = self.connector.execute_query(sql_query)  # Выполняем SQL-запрос и получаем DataFrame
+        # Сохраняем мастер-справочник
+        self._save_to_csv(df_master, master_sql_path)
+
+        reference_configs = [
+            ['model_id'],
+            ['lease_id'],
+            ['legal_entity'],
+            ['trc_abbreviation'],
+            ['model_id', 'legal_entity', 'unit_id'],
+            ['legal_entity', 'unit_id']
+        ]
+
+        for columns in reference_configs:
+            self.create_reference_table(df_master, columns)
+
+        return df_master  # Возвращаем мастер-справочник
+
+
+    def extract_tenants_with_placeholder(self):
+        """Извлекает данные арендаторов чанками по ref_lease_ids.csv"""
+
+        # Читаем lease_id из справочника
+        lease_ref_path = self.output_dir / 'ref_lease.csv'  # Формируем путь к файлу со lease_id
+        if not lease_ref_path.exists():  # Проверяем существует ли файл
+            return  # Если файла нет, выходим из метода
+
+        df_lease_ref = pd.read_csv(lease_ref_path)  # Читаем CSV-файл с lease_id
+        lease_ids = df_lease_ref['lease_id'].dropna().tolist()  # Получаем список уникальных lease_id без NaN
+
+        if not lease_ids:  # Проверяем есть ли lease_id для обработки
+            return  # Если список пуст, выходим из метода
+
+        # Читаем SQL шаблон
+        sql_template_path = self.sql_dir / 'extract_tenants.sql'  # Формируем путь к SQL-шаблону
+        if not sql_template_path.exists():  # Проверяем существует ли файл
+            return  # Если файла нет, выходим из метода
+
+        sql_template = self.read_sql_file(sql_template_path)  # Читаем SQL-шаблон из файла
+
+        # Обрабатываем чанками
+        chunk_size = 500  # Размер чанка (количество lease_id за один запрос)
+        all_chunks = []  # Список для хранения всех чанков данных
+
+        for i in range(0, len(lease_ids), chunk_size):  # Итерируемся по lease_id с шагом chunk_size
+            chunk_lease_ids = lease_ids[i:i + chunk_size]  # Получаем текущий чанк lease_id
+            ids_str = ','.join(str(int(lease_id)) for lease_id in chunk_lease_ids)  # Преобразуем в строку через запятую
+
+            # Заменяем плейсхолдер в SQL
+            sql_query = sql_template.replace('{lease_id_placeholder}', ids_str)  # Подставляем lease_id в SQL-запрос
+
+            try:
+                df_chunk = self.connector.execute_query(sql_query)  # Выполняем SQL-запрос для текущего чанка
+                all_chunks.append(df_chunk)  # Добавляем результат в список чанков
+            except Exception:  # Перехватываем любые исключения
+                continue  # Продолжаем обработку следующих чанков при ошибке
+
+        if not all_chunks:  # Проверяем, есть ли данные в чанках
+            return  # Если нет данных, выходим из метода
+
+        # Объединяем все чанки
+        df_result = pd.concat(all_chunks, ignore_index=True)  # Объединяем все чанки в один DataFrame
+
+        # Сохраняем результат
+        output_path = self.output_dir / 'extract_tenants.csv'  # Формируем путь для сохранения результата
+        df_result.to_csv(output_path, index=False, encoding=self.encoding)  # Сохраняем объединенные данные в CSV
+
+        return df_result  # Возвращаем результат
 
 def extract_data():
     """Основная функция для извлечения данных"""
     try:
-        connector = create_db_connector_from_config()
+        connector = create_db_connector_from_config()  # Создаем соединение с БД из конфигурации
 
-        if not connector.test_connection():
-            logger.error("Не удалось подключиться к БД")
-            return False
+        if not connector.test_connection():  # Проверяем подключение к БД
+            return False  # Возвращаем False если подключение не удалось
 
-        extractor = DBExtractor(connector=connector)
+        extractor = DBExtractor(connector=connector)  # Создаем экземпляр extractor
 
-        # Выполняем SQL файлы в правильном порядке
-        sql_files_to_execute = [
-            'extract_rooms.sql',  # Сначала получаем помещения
-            'extract_statuses.sql'  # Затем статусы (использует данные из rooms)
-        ]
+        # Получаем мастер-справочник
+        extractor.get_master_reference()  # Вызываем метод получения мастер-справочника
 
-        extractor.execute_sql_to_csv(sql_files_to_execute)
+        # Извлекаем исторические данные
+        extractor.extract_history()
 
-        logger.info("✅ Извлечение данных завершено")
-        return True
+        # Извлекаем данные арендаторов чанками
+        extractor.extract_tenants_with_placeholder()  # Вызываем метод извлечения данных арендаторов
 
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return False
+        return True  # Возвращаем True при успешном выполнении
+
+    except Exception as e:  # Перехватываем любые исключения
+        print(f"Ошибка при извлечении данных: {e}")  # Выводим сообщение об ошибке
+        return False  # Возвращаем False при возникновении ошибки
 
 
 if __name__ == "__main__":
-    # Настройка логирования
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-
-    success = extract_data()
-    if not success:
-        sys.exit(1)
+    success = extract_data()  # Вызываем основную функцию извлечения данных
+    if not success:  # Проверяем успешность выполнения
+        sys.exit(1)  # Завершаем программу с кодом ошибки 1 если были проблемы

@@ -25,7 +25,7 @@ model_type TEXT NOT NULL
 ```sql
 room_key INTEGER PRIMARY KEY AUTOINCREMENT
 room_id TEXT NOT NULL
-area_sq_m REAL NOT NULL
+area_sq_m REAL NOT NULL 
 floor INTEGER NOT NULL
 trc_id TEXT NOT NULL
 legal_entity TEXT NOT NULL
