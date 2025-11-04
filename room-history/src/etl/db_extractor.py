@@ -50,7 +50,7 @@ class DBExtractor:
             print(f"Ошибка чтения SQL файла {filepath}: {e}")  # Выводим ошибку чтения файла
             raise  # Пробрасываем исключение дальше
 
-    def _save_to_csv(self, df: pd.DataFrame, sql_path: Path):
+    def save_to_csv(self, df: pd.DataFrame, sql_path: Path):
         """Сохраняет DataFrame в CSV файл"""
 
         # path.stem - имя файла без расширения
@@ -91,10 +91,10 @@ class DBExtractor:
         base_filename = "ref_" + "_".join(column_prefixes)
 
         # Сохраняем в CSV
-        self._save_to_csv(ref_df, Path(base_filename))
+        self.save_to_csv(ref_df, Path(base_filename))
 
         # Сохраняем в CSV
-        self._save_to_csv(ref_df, Path(base_filename))
+        self.save_to_csv(ref_df, Path(base_filename))
 
         print(f"Создан справочник {base_filename}.csv с {len(ref_df)} уникальными записями")
 
@@ -116,7 +116,10 @@ class DBExtractor:
             df_history = self.connector.execute_query(sql_query)
 
             # Сохраняем исторические данные в CSV
-            self._save_to_csv(df_history, history_sql_path)
+            self.save_to_csv(df_history, history_sql_path)
+
+            # Создаем справочник статусов из исторических данных
+            self.create_status_reference(df_history)
 
             return df_history
 
@@ -137,7 +140,7 @@ class DBExtractor:
         sql_query = self.read_sql_file(master_sql_path)  # Читаем SQL из файла
         df_master = self.connector.execute_query(sql_query)  # Выполняем SQL-запрос и получаем DataFrame
         # Сохраняем мастер-справочник
-        self._save_to_csv(df_master, master_sql_path)
+        self.save_to_csv(df_master, master_sql_path)
 
         reference_configs = [
             ['model_id'],
@@ -152,6 +155,36 @@ class DBExtractor:
             self.create_reference_table(df_master, columns)
 
         return df_master  # Возвращаем мастер-справочник
+
+    def create_status_reference(self, df_history: pd.DataFrame):
+        """
+        Создает справочник статусов из исторических данных
+
+        Args:
+            df_history: DataFrame с историческими данными из extract_history.csv
+        """
+        try:
+            # Проверяем наличие необходимых колонок
+            required_columns = ['crm_status']
+            missing_columns = [col for col in required_columns if col not in df_history.columns]
+
+            if missing_columns:
+                print(f"Предупреждение: отсутствуют колонки {missing_columns} для создания справочника статусов")
+                return
+
+            # Создаем справочник с уникальными статусами
+            status_ref = df_history[['crm_status']].drop_duplicates().reset_index(drop=True)
+
+            # Сортируем для удобства
+            status_ref = status_ref.sort_values('crm_status').reset_index(drop=True)
+
+            # Сохраняем справочник
+            self.save_to_csv(status_ref, Path('ref_crm_status'))
+
+            print(f"Создан справочник статусов: {len(status_ref)} уникальных записей")
+
+        except Exception as e:
+            print(f"Ошибка при создании справочника статусов: {e}")
 
 
     def extract_tenants_with_placeholder(self):
@@ -204,6 +237,73 @@ class DBExtractor:
 
         return df_result  # Возвращаем результат
 
+    def enrich_models_reference(self) -> pd.DataFrame:
+        """
+        Обогащает существующий справочник моделей дополнительными данными
+        и сохраняет в тот же файл ref_model.csv
+
+        Returns:
+            pd.DataFrame: Обогащенный справочник моделей
+        """
+        try:
+            # Читаем существующий справочник моделей
+            ref_model_path = self.output_dir / 'ref_model.csv'
+            if not ref_model_path.exists():
+                print("Предупреждение: ref_model.csv не найден")
+                return pd.DataFrame()
+
+            df_ref_model = pd.read_csv(ref_model_path)
+
+            if df_ref_model.empty:
+                print("Предупреждение: ref_model.csv пуст")
+                return pd.DataFrame()
+
+            # Получаем список model_id для фильтрации
+            model_ids = df_ref_model['model_id'].dropna().unique().tolist()
+
+            if not model_ids:
+                print("Предупреждение: не найдено model_id в справочнике")
+                return pd.DataFrame()
+
+            # Формируем путь к SQL-файлу с моделями
+            models_sql_path = self.sql_dir / 'extract_models.sql'
+
+            # Читаем SQL-запрос из файла
+            sql_query = self.read_sql_file(models_sql_path)
+
+            # Подставляем model_ids в запрос
+            ids_str = ','.join(str(int(model_id)) for model_id in model_ids if pd.notna(model_id))
+            sql_query = sql_query.replace('{model_id}', ids_str)
+
+            # Выполняем SQL-запрос и получаем дополнительные данные
+            df_models_additional = self.connector.execute_query(sql_query)
+
+            if df_models_additional.empty:
+                print("Предупреждение: не найдено дополнительных данных по моделям")
+                return df_ref_model
+
+            # Объединяем существующий справочник с дополнительными данными
+            df_enriched = pd.merge(
+                df_ref_model,
+                df_models_additional,
+                on='model_id',
+                how='left',
+                suffixes=('', '_additional')
+            )
+
+            # Удаляем дублирующиеся колонки (если есть)
+            df_enriched = df_enriched.loc[:, ~df_enriched.columns.duplicated()]
+
+            # Сохраняем обогащенный справочник В ТОТ ЖЕ ФАЙЛ
+            df_enriched.to_csv(ref_model_path, index=False, encoding=self.encoding)
+
+            print(f"Обогащенный справочник моделей сохранен в ref_model.csv: {len(df_enriched)} записей")
+            return df_enriched
+
+        except Exception as e:
+            print(f"Ошибка при обогащении справочника моделей: {e}")
+            return pd.DataFrame()
+
 def extract_data():
     """Основная функция для извлечения данных"""
     try:
@@ -222,6 +322,8 @@ def extract_data():
 
         # Извлекаем данные арендаторов чанками
         extractor.extract_tenants_with_placeholder()  # Вызываем метод извлечения данных арендаторов
+
+        extractor.enrich_models_reference()
 
         return True  # Возвращаем True при успешном выполнении
 

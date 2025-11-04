@@ -44,19 +44,54 @@ class HistoryProcessor:
             group = group.copy()
             group['previous_tenant'] = previous_tenants
             group['future_tenant'] = future_tenants
+
+            # group['previous_tenant'] = pd.Series(previous_tenants).astype(int)
+            # group['future_tenant'] = pd.Series(future_tenants).astype(int)
+
             return group
 
-        return df.groupby(['model_id', 'unit_id', 'legal_entity']).apply(process_group).reset_index(drop=True)
+        result = df.groupby(['model_id', 'unit_id', 'legal_entity']).apply(process_group).reset_index(drop=True)
+
+        # Дополнительная проверка и преобразование на уровне всего DataFrame
+        result['previous_tenant'] = result['previous_tenant'].astype('Int64')
+        result['future_tenant'] = result['future_tenant'].astype('Int64')
+
+        return result
 
     def save_to_csv(self, df: pd.DataFrame, filename: str):
         output_path = self.output_dir / filename
         df.to_csv(output_path, index=False, encoding='utf-8')
+
+    def add_fact_to_reference(self):
+        """Добавляет запись '666 Факт null' в справочник моделей"""
+        ref_model_path = self.data_dir / 'ref_model.csv'
+
+        df_ref = pd.read_csv(ref_model_path)
+        # Проверяем, есть ли уже запись с model_id = 666
+
+        fact_record = pd.DataFrame({
+            'model_id': [666],
+            'model_type': ['Факт'],
+            'forecast_year': [None]
+        })
+        df_ref = pd.concat([df_ref, fact_record], ignore_index=True)
+
+        # Преобразуем float в int, затем в строку без .0, NaN заменяем на 'все'
+        df_ref['forecast_year'] = df_ref['forecast_year'].apply(
+            lambda x: str(int(float(x))) if pd.notna(x) and x != '' and x != 'все' else x
+        )
+
+        return df_ref
+
+
 
 def process_history_data():
     processor = HistoryProcessor()
     df = processor.load_data()
     df_processed = processor.process_history(df)
     processor.save_to_csv(df_processed, 'processed_history.csv')
+    df_ref = processor.add_fact_to_reference()
+    processor.save_to_csv(df_ref, 'processed_ref_crm_status.csv')
     return True
 
 if __name__ == "__main__":

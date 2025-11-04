@@ -1,0 +1,6 @@
+SELECT
+    model_id,                    -- Уникальный идентификатор финансовой модели
+    model_type,                  -- Тип модели
+    forecast_year,               -- Год прогноза
+FROM financial_models
+WHERE model_id IN ({model_id})
