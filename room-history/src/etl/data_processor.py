@@ -72,14 +72,27 @@ class HistoryProcessor:
         fact_record = pd.DataFrame({
             'model_id': [666],
             'model_type': ['Факт'],
-            'forecast_year': [None]
+            'forecast_year': ['все']
         })
         df_ref = pd.concat([df_ref, fact_record], ignore_index=True)
 
-        # Преобразуем float в int, затем в строку без .0, NaN заменяем на 'все'
-        df_ref['forecast_year'] = df_ref['forecast_year'].apply(
-            lambda x: str(int(float(x))) if pd.notna(x) and x != '' and x != 'все' else x
-        )
+        # Сначала создаем функцию для безопасного преобразования
+        def safe_convert(x):
+            # Если значение NaN или пустое - возвращаем 'все'
+            if pd.isna(x) or x == '' or x is None:
+                return 'все'
+            # Если уже 'все' - возвращаем как есть
+            if x == 'все':
+                return 'все'
+            try:
+                # Пробуем преобразовать в float, затем в int, затем в строку
+                return str(int(float(x)))
+            except (ValueError, TypeError):
+                # Если не получается преобразовать - возвращаем 'все'
+                return 'все'
+
+        # Применяем функцию ко всем значениям
+        df_ref['forecast_year'] = df_ref['forecast_year'].apply(safe_convert)
 
         return df_ref
 
@@ -91,7 +104,7 @@ def process_history_data():
     df_processed = processor.process_history(df)
     processor.save_to_csv(df_processed, 'processed_history.csv')
     df_ref = processor.add_fact_to_reference()
-    processor.save_to_csv(df_ref, 'processed_ref_crm_status.csv')
+    processor.save_to_csv(df_ref, 'processed_ref_model.csv')
     return True
 
 if __name__ == "__main__":
