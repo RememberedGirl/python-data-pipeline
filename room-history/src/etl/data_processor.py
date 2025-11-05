@@ -235,6 +235,51 @@ class HistoryProcessor:
             print(f"Ошибка при создании истории экспертов: {e}")
             return pd.DataFrame()
 
+    def add_foreign_key_to_tenants(self):
+        """Добавляет вторичный ключ в extract_tenants.csv"""
+        try:
+            # Загружаем extract_tenants.csv
+            tenants_path = self.data_dir / 'extract_tenants.csv'
+            if not tenants_path.exists():
+                print("Предупреждение: extract_tenants.csv не найден")
+                return pd.DataFrame()
+
+            df_tenants = pd.read_csv(tenants_path)
+
+            print(f"Количество записей в extract_tenants.csv: {len(df_tenants)}")
+
+            # Загружаем processed_ref_legal_unit.csv
+            legal_unit_path = self.output_dir / 'processed_ref_legal_unit.csv'
+            if legal_unit_path.exists():
+                df_legal_unit = pd.read_csv(legal_unit_path)
+
+                # Объединяем с справочником чтобы добавить legal_unit_id
+                df_tenants = pd.merge(
+                    df_tenants,
+                    df_legal_unit[['legal_entity', 'unit_id', 'legal_unit_id']],
+                    on=['legal_entity', 'unit_id'],
+                    how='left'
+                )
+
+                # Преобразуем legal_unit_id в Int64 для целочисленного типа
+                df_tenants['legal_unit_id'] = df_tenants['legal_unit_id'].astype('Int64')
+
+                # Перемещаем legal_unit_id в начало для удобства
+                cols = ['legal_unit_id'] + [col for col in df_tenants.columns if col != 'legal_unit_id']
+                df_tenants = df_tenants[cols]
+
+                print(f"Добавлен вторичный ключ legal_unit_id в extract_tenants.csv")
+            else:
+                # Добавляем пустой столбец если справочник не загружен
+                df_tenants['legal_unit_id'] = None
+                print("Предупреждение: processed_ref_legal_unit.csv не найден, вторичный ключ не добавлен")
+
+            return df_tenants
+
+        except Exception as e:
+            print(f"Ошибка при добавлении вторичного ключа в extract_tenants: {e}")
+            return pd.DataFrame()
+
 def process_history_data():
     processor = HistoryProcessor()
 
@@ -250,6 +295,10 @@ def process_history_data():
     # Создаем историю экспертов
     df_expert = processor.create_expert_history()
     processor.save_to_csv(df_expert, 'processed_expert_history.csv')
+
+    # Добавляем вторичный ключ в tenants
+    df_tenants = processor.add_foreign_key_to_tenants()
+    processor.save_to_csv(df_tenants, 'processed_tenants.csv')
 
     return True
 
