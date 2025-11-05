@@ -5,6 +5,7 @@ import sys
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+
 class HistoryProcessor:
     def __init__(self):
         self.data_dir = project_root / 'data' / 'raw'
@@ -15,7 +16,41 @@ class HistoryProcessor:
         file_path = self.data_dir / 'extract_history.csv'
         return pd.read_csv(file_path)
 
+    def add_primary_key_to_legal_unit(self):
+        """Добавляет первичный ключ в справочник legal_entity + unit_id"""
+        legal_unit_path = self.data_dir / 'ref_legal_unit.csv'
+
+        if not legal_unit_path.exists():
+            print("Предупреждение: ref_legal_unit.csv не найден")
+            return pd.DataFrame()
+
+        df_legal_unit = pd.read_csv(legal_unit_path)
+
+        # Проверяем, есть ли уже первичный ключ
+        if 'legal_unit_id' in df_legal_unit.columns:
+            print("Справочник ref_legal_unit.csv уже содержит первичный ключ")
+            return df_legal_unit
+
+        # Добавляем автоинкрементный первичный ключ
+        df_legal_unit = df_legal_unit.reset_index(drop=True)
+        df_legal_unit.insert(0, 'legal_unit_id', range(1, len(df_legal_unit) + 1))
+
+        print(f"Добавлен первичный ключ legal_unit_id для {len(df_legal_unit)} записей")
+        return df_legal_unit
+
     def process_history(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Обрабатывает исторические данные и добавляет вторичный ключ"""
+        # Сначала получаем обогащенный справочник legal_unit
+        df_legal_unit = self.add_primary_key_to_legal_unit()
+
+        if df_legal_unit.empty:
+            print("Предупреждение: не удалось загрузить справочник legal_unit для добавления вторичного ключа")
+            # Продолжаем обработку без вторичного ключа
+            legal_unit_id = None
+        else:
+            # Сохраняем промежуточный справочник
+            self.save_to_csv(df_legal_unit, 'processed_ref_legal_unit.csv')
+
         def process_group(group):
             group = group.sort_values('status_sequence')
             non_zero_leases = group[group['lease_id'] != 0]
@@ -45,16 +80,34 @@ class HistoryProcessor:
             group['previous_tenant'] = previous_tenants
             group['future_tenant'] = future_tenants
 
-            # group['previous_tenant'] = pd.Series(previous_tenants).astype(int)
-            # group['future_tenant'] = pd.Series(future_tenants).astype(int)
-
             return group
 
+        # Обрабатываем группы
         result = df.groupby(['model_id', 'unit_id', 'legal_entity']).apply(process_group).reset_index(drop=True)
+
+        # ДОБАВЛЯЕМ ВТОРИЧНЫЙ КЛЮЧ
+        if not df_legal_unit.empty:
+            # Объединяем с справочником чтобы добавить legal_unit_id
+            result = pd.merge(
+                result,
+                df_legal_unit[['legal_entity', 'unit_id', 'legal_unit_id']],
+                on=['legal_entity', 'unit_id'],
+                how='left'
+            )
+
+            # Перемещаем legal_unit_id в начало для удобства
+            cols = ['legal_unit_id'] + [col for col in result.columns if col != 'legal_unit_id']
+            result = result[cols]
+
+            print(f"Добавлен вторичный ключ legal_unit_id в исторические данные")
+        else:
+            # Добавляем пустой столбец если справочник не загружен
+            result['legal_unit_id'] = None
 
         # Дополнительная проверка и преобразование на уровне всего DataFrame
         result['previous_tenant'] = result['previous_tenant'].astype('Int64')
         result['future_tenant'] = result['future_tenant'].astype('Int64')
+        result['legal_unit_id'] = result['legal_unit_id'].astype('Int64')
 
         return result
 
@@ -67,7 +120,6 @@ class HistoryProcessor:
         ref_model_path = self.data_dir / 'ref_model.csv'
 
         df_ref = pd.read_csv(ref_model_path)
-        # Проверяем, есть ли уже запись с model_id = 666
 
         fact_record = pd.DataFrame({
             'model_id': [666],
@@ -96,46 +148,20 @@ class HistoryProcessor:
 
         return df_ref
 
-    def add_primary_key_to_legal_unit(self):
-        """Добавляет первичный ключ в справочник legal_entity + unit_id"""
-        legal_unit_path = self.data_dir / 'ref_legal_unit.csv'
-
-        if not legal_unit_path.exists():
-            print("Предупреждение: ref_legal_unit.csv не найден")
-            return pd.DataFrame()
-
-        df_legal_unit = pd.read_csv(legal_unit_path)
-
-        # Проверяем, есть ли уже первичный ключ
-        if 'legal_unit_id' in df_legal_unit.columns:
-            print("Справочник ref_legal_unit.csv уже содержит первичный ключ")
-            return df_legal_unit
-
-        # Добавляем автоинкрементный первичный ключ
-        df_legal_unit = df_legal_unit.reset_index(drop=True)
-        df_legal_unit.insert(0, 'legal_unit_id', range(1, len(df_legal_unit) + 1))
-
-        print(f"Добавлен первичный ключ legal_unit_id для {len(df_legal_unit)} записей")
-        return df_legal_unit
-
-
 def process_history_data():
     processor = HistoryProcessor()
 
-    # Обрабатываем исторические данные
+    # Обрабатываем исторические данные (теперь с добавлением вторичного ключа)
     df = processor.load_data()
-    df_processed = processor.process_history(df)
+    df_processed = processor.process_history(df)  # Этот метод теперь сам создает processed_ref_legal_unit.csv
     processor.save_to_csv(df_processed, 'processed_history.csv')
 
     # Обогащаем справочник моделей
     df_ref = processor.add_fact_to_reference()
     processor.save_to_csv(df_ref, 'processed_ref_model.csv')
 
-    # Обогащаем справочник legal_unit первичным ключом
-    df_legal_unit = processor.add_primary_key_to_legal_unit()
-    processor.save_to_csv(df_legal_unit, 'processed_ref_legal_unit.csv')
-
     return True
+
 
 if __name__ == "__main__":
     process_history_data()
