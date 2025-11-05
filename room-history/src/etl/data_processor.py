@@ -148,6 +148,93 @@ class HistoryProcessor:
 
         return df_ref
 
+    def create_expert_history(self):
+        """Создает историю экспертов с заменой TrcShoppingMall на legal_entity и добавляет вторичный ключ"""
+        try:
+            # Загружаем mapping_trc.csv
+            mapping_path = self.output_dir / 'mapping_trc.csv'
+            if not mapping_path.exists():
+                print("Предупреждение: mapping_trc.csv не найден")
+                return pd.DataFrame()
+
+            df_mapping = pd.read_csv(mapping_path)
+
+            # Загружаем expert.csv
+            expert_path = self.data_dir / 'expert.csv'
+            if not expert_path.exists():
+                print("Предупреждение: expert.csv не найден")
+                return pd.DataFrame()
+
+            df_expert = pd.read_csv(expert_path)
+
+            print(f"Количество записей в expert.csv: {len(df_expert)}")
+
+            # Создаем маппинг из crm названий в legal_entity
+            mapping_dict = dict(zip(df_mapping['crm'], df_mapping['legal_entity']))
+
+            # Заменяем TrcShoppingMall на legal_entity
+            df_expert['legal_entity'] = df_expert['TrcShoppingMall'].map(mapping_dict)
+
+            # Удаляем строки где не удалось смапить legal_entity
+            original_count = len(df_expert)
+            df_expert = df_expert.dropna(subset=['legal_entity'])
+            removed_count = original_count - len(df_expert)
+
+            print(f"Удалено несмапленных записей: {removed_count}")
+
+            # Переименовываем колонки
+            df_expert = df_expert.rename(columns={
+                'TrcUnitNumber': 'unit_id',
+                'TrcIsChief': 'is_chief',
+                'TrcContactFullName': 'contact_full_name',
+                'TrcRespStartDate': 'resp_start_date',
+                'TrcRespEndDate': 'resp_end_date',
+                'ModifiedOn': 'modified_on',
+                'TrcBooleanActive': 'is_active'
+            })
+
+            # ДОБАВЛЯЕМ ВТОРИЧНЫЙ КЛЮЧ
+            # Загружаем processed_ref_legal_unit.csv
+            legal_unit_path = self.output_dir / 'processed_ref_legal_unit.csv'
+            if legal_unit_path.exists():
+                df_legal_unit = pd.read_csv(legal_unit_path)
+
+                # Объединяем с справочником чтобы добавить legal_unit_id
+                df_expert = pd.merge(
+                    df_expert,
+                    df_legal_unit[['legal_entity', 'unit_id', 'legal_unit_id']],
+                    on=['legal_entity', 'unit_id'],
+                    how='left'
+                )
+                # Преобразуем legal_unit_id в Int64 для целочисленного типа
+                df_expert['legal_unit_id'] = df_expert['legal_unit_id'].astype('Int64')
+
+                # Перемещаем legal_unit_id в начало для удобства
+                cols = ['legal_unit_id'] + [col for col in df_expert.columns if col != 'legal_unit_id']
+                df_expert = df_expert[cols]
+
+                print(f"Добавлен вторичный ключ legal_unit_id в историю экспертов")
+            else:
+                # Добавляем пустой столбец если справочник не загружен
+                df_expert['legal_unit_id'] = None
+                print("Предупреждение: processed_ref_legal_unit.csv не найден, вторичный ключ не добавлен")
+
+            # Выбираем только нужные колонки
+            final_columns = [
+                'legal_unit_id', 'unit_id', 'legal_entity', 'is_chief', 'contact_full_name',
+                'resp_start_date', 'resp_end_date', 'modified_on', 'is_active'
+            ]
+
+            df_expert_final = df_expert[final_columns]
+
+            print(f"Создана история экспертов: {len(df_expert_final)} записей")
+
+            return df_expert_final
+
+        except Exception as e:
+            print(f"Ошибка при создании истории экспертов: {e}")
+            return pd.DataFrame()
+
 def process_history_data():
     processor = HistoryProcessor()
 
@@ -159,6 +246,10 @@ def process_history_data():
     # Обогащаем справочник моделей
     df_ref = processor.add_fact_to_reference()
     processor.save_to_csv(df_ref, 'processed_ref_model.csv')
+
+    # Создаем историю экспертов
+    df_expert = processor.create_expert_history()
+    processor.save_to_csv(df_expert, 'processed_expert_history.csv')
 
     return True
 
